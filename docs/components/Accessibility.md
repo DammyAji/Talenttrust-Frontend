@@ -47,6 +47,61 @@ Axe audits run as part of the standard Jest suite. Any violation fails the suite
 ## CI
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) already runs `npm test` on every push and pull request to the `main` branch. Adding new a11y tests to `a11y.test.tsx` automatically gates violations in CI.
+he
+## Skip-to-content link (WCAG 2.4.1 Bypass Blocks)
+
+A visually-hidden skip link is rendered as the **first focusable element** in `<body>` (inside `src/app/layout.tsx`). It lets keyboard and screen-reader users skip the sticky header navigation on every page.
+
+### How it works
+
+```tsx
+{/* First child inside WalletProvider — before the header */}
+<a href="#main-content" className="skip-link">
+  Skip to main content
+</a>
+```
+
+- **Visually hidden when blurred**: the `.skip-link` class positions the link off-screen (`top: -9999px`). This keeps it out of the visual flow without removing it from the tab order.
+- **Visible on focus**: `:focus` resets `top` to `0`, revealing the link in the top-left corner with the app's primary colour and a matching focus ring (`var(--ring)`).
+- **Target**: `<main id="main-content" tabIndex={-1}>` — the `tabIndex={-1}` allows the browser to move focus there programmatically when the link is activated.
+- **No header disruption**: the link uses `position: absolute` and `z-index: 9999`, so it overlays without affecting the sticky header or `SettingsTrigger` layout.
+
+### CSS (globals.css)
+
+```css
+.skip-link {
+  position: absolute;
+  top: -9999px;
+  left: 0;
+  z-index: 9999;
+  padding: 0.75rem 1.25rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+  border-radius: 0 0 var(--radius) 0;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+```
+
+### Test file
+
+Tests live in `src/app/__tests__/layout.test.tsx` and cover:
+
+| Test | What is verified |
+|------|-----------------|
+| Correct link text | `getByRole('link', { name: /skip to main content/i })` |
+| `href="#main-content"` | Points to the main landmark |
+| `.skip-link` class | CSS hook is applied |
+| First focusable element | Skip link precedes all header controls in DOM order |
+| `<main id="main-content">` exists | Target element is present |
+| `tabIndex={-1}` on `<main>` | Programmatic focus is possible |
+| axe clean | No WCAG violations via `jest-axe` |
 
 ## RouteAnnouncer — client-side navigation focus and announcement
 
