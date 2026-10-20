@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "test": "node scripts/check-links.mjs"
+    "test": "node scripts/check-links.mjs && vitest run"
   },
   "engines": {
     "node": ">=20"
@@ -18,10 +18,19 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/jest-axe": "^3.5.9",
     "@types/node": "^20.17.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "typescript": "^5.9.3"
+    "@vitejs/plugin-react": "^4.3.4",
+    "jest-axe": "^11.0.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   },
   "license": "MIT"
 }
