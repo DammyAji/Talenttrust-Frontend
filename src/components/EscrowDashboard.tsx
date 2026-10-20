@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, EscrowContract } from '@/lib/api';
+import { MilestoneTimeline } from './milestones/MilestoneTimeline';
 
 const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a);
 
@@ -97,7 +98,6 @@ export function EscrowDashboard() {
         {contracts === null && <div className="card muted">Loading escrows...</div>}
         {contracts?.length === 0 && !error && <div className="card muted">No escrows yet. Create the first one.</div>}
         {contracts?.map((c) => {
-          const next = c.milestones.find((m) => !m.released);
           const active = c.status === 'Created' || c.status === 'Funded';
           const pct = c.totalAmount ? Math.round((c.releasedAmount / c.totalAmount) * 100) : 0;
           return (
@@ -119,18 +119,15 @@ export function EscrowDashboard() {
                 Released {c.releasedAmount} / {c.totalAmount} {c.token} &middot; In escrow{' '}
                 {c.fundedAmount - c.releasedAmount} {c.token}
               </p>
-              <ul className="milestones">
-                {c.milestones.map((m) => (
-                  <li key={m.index}>
-                    <span className="truncate">
-                      {m.released ? '[x]' : '[ ]'} {m.title}
-                    </span>
-                    <span className="mono">
-                      {m.amount} {c.token}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <MilestoneTimeline
+                contract={c}
+                onRelease={(index) =>
+                  act(c.id, () =>
+                    api(`/api/v1/contracts/${c.id}/milestones/${index}/release`, { method: 'POST' }),
+                  )
+                }
+                busy={busy === c.id}
+              />
               <div className="row">
                 {active && c.fundedAmount < c.totalAmount && (
                   <button
@@ -143,15 +140,6 @@ export function EscrowDashboard() {
                     }
                   >
                     Fund {c.totalAmount - c.fundedAmount} {c.token}
-                  </button>
-                )}
-                {active && next && c.fundedAmount - c.releasedAmount >= next.amount && (
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={busy === c.id}
-                    onClick={() => act(c.id, () => api(`/api/v1/contracts/${c.id}/milestones/${next.index}/release`, { method: 'POST' }))}
-                  >
-                    Release next
                   </button>
                 )}
                 {active && (
