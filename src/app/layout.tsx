@@ -33,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <div className="footer-links">
               <Link href="/docs">Docs</Link>
+              <Link href="/status">Status</Link>
               <a href={apiDocsUrl} target="_blank" rel="noreferrer">
                 API
               </a>

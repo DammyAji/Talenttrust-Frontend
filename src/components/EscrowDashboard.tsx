@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, EscrowContract } from '@/lib/api';
 
@@ -91,7 +92,10 @@ export function EscrowDashboard() {
       <div className="stack" style={{ minWidth: 0 }}>
         {error && (
           <div className="alert alert-error" role="alert">
-            {error}
+            {error}{' '}
+            <Link href="/status" className="alert-link">
+              See system status
+            </Link>
           </div>
         )}
         {contracts === null && <div className="card muted">Loading escrows...</div>}
