@@ -7,9 +7,16 @@ import { MilestoneTimeline } from './milestones/MilestoneTimeline';
 const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a);
 
 export function EscrowDashboard() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const query = useMemo(() => parseQuery(searchParams), [searchParams]);
+  const [search, setSearch] = useState(query.q);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [contracts, setContracts] = useState<EscrowContract[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState<number | 'new' | null>(null);
+  const loadController = useRef<AbortController | null>(null);
   const [form, setForm] = useState({
     title: 'Website redesign',
     client: 'GCLIENT' + 'X'.repeat(49),
@@ -17,20 +24,59 @@ export function EscrowDashboard() {
     milestones: 'Design: 300, Build: 700',
   });
 
+  // Status is filtered by the API, the rest is done client-side
   const load = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
     try {
-      const res = await api<{ data: EscrowContract[] }>('/api/v1/contracts');
-      setContracts(res.data.sort((a, b) => b.id - a.id));
+      const qs = query.status ? `?status=${encodeURIComponent(query.status)}` : '';
+      const res = await api<{ data: EscrowContract[] }>(`/api/v1/contracts${qs}`, { signal: controller.signal });
+      setContracts(Array.isArray(res.data) ? res.data : []);
       setError(null);
     } catch (e) {
-      setError(`Could not reach the API: ${(e as Error).message}`);
+      if (e instanceof ApiError && e.kind === 'aborted') return;
+      const detail = e instanceof ApiError ? e.message : (e as Error).message;
+      setError({ message: e instanceof ApiError ? e.userMessage : `Could not reach the API: ${detail}`, detail });
       setContracts([]);
     }
-  }, []);
+  }, [query.status]);
 
   useEffect(() => {
     load();
+    return () => loadController.current?.abort();
   }, [load]);
+
+  const update = useCallback(
+    (patch: Partial<ContractQuery>) => {
+      const qs = toSearchParams({ ...query, page: 1, ...patch }).toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [query, router, pathname],
+  );
+
+  useEffect(() => {
+    setSearch(query.q);
+  }, [query.q]);
+
+  useEffect(() => {
+    if (search.trim() === query.q) return;
+    const t = setTimeout(() => update({ q: search.trim() }), 250);
+    return () => clearTimeout(t);
+  }, [search, query.q, update]);
+
+  const result = useMemo(() => applyQuery(contracts ?? [], query), [contracts, query]);
+  const filtered = query.status !== '' || query.q !== '';
+
+  const goToPage = (page: number) => {
+    update({ page });
+    headingRef.current?.focus();
+  };
+
+  const clearFilters = () => {
+    setSearch('');
+    update(DEFAULT_QUERY);
+  };
 
   const act = async (id: number | 'new', fn: () => Promise<unknown>) => {
     setBusy(id);
@@ -39,7 +85,9 @@ export function EscrowDashboard() {
       await fn();
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.kind === 'aborted') return;
+      const detail = e instanceof ApiError ? e.message : (e as Error).message;
+      setError({ message: e instanceof ApiError ? e.userMessage : detail, detail });
     } finally {
       setBusy(null);
     }
@@ -91,10 +139,24 @@ export function EscrowDashboard() {
 
       <div className="stack" style={{ minWidth: 0 }}>
         {error && (
-          <div className="alert alert-error" role="alert">
-            {error}
+          <div className="alert alert-error" role="alert" title={error.detail}>
+            {error.message}
           </div>
         )}
+        <h2 id="escrow-list" className="list-heading" ref={headingRef} tabIndex={-1}>
+          Escrows
+        </h2>
+        <EscrowToolbar
+          status={query.status}
+          sort={query.sort}
+          search={search}
+          onStatusChange={(status) => update({ status })}
+          onSortChange={(sort) => update({ sort })}
+          onSearchChange={setSearch}
+        />
+        <p className="small muted" role="status" aria-live="polite" style={{ margin: 0 }}>
+          {contracts !== null && !error && result.total > 0 && `Showing ${result.from}–${result.to} of ${result.total} escrows`}
+        </p>
         {contracts === null && <div className="card muted">Loading escrows...</div>}
         {contracts?.length === 0 && !error && <div className="card muted">No escrows yet. Create the first one.</div>}
         {contracts?.map((c) => {
@@ -195,6 +257,7 @@ export function EscrowDashboard() {
             </article>
           );
         })}
+        <Pagination page={result.page} pageCount={result.pageCount} onPageChange={goToPage} />
       </div>
     </div>
   );
