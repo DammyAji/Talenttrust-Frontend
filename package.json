@@ -13,9 +13,12 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@stellar/stellar-sdk": "^17.2.1",
+    "@testing-library/dom": "^10.4.2",
     "next": "16.3.8",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "vite": "^8.3.4"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",

@@ -189,6 +189,12 @@ function EscrowCard({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function EscrowDashboard() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const query = useMemo(() => parseQuery(searchParams), [searchParams]);
+  const [search, setSearch] = useState(query.q);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [contracts, setContracts] = useState<EscrowContract[] | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   // Per-card errors: contractId → error message
@@ -221,6 +227,9 @@ export function EscrowDashboard() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
     try {
       const res = await api<{ data: EscrowContract[] }>('/api/v1/contracts');
       setContracts(res.data.sort((a, b) => b.id - a.id));
@@ -229,10 +238,11 @@ export function EscrowDashboard() {
       setGlobalError(`Could not reach the API: ${(e as Error).message}`);
       setContracts([]);
     }
-  }, []);
+  }, [query.status]);
 
   useEffect(() => {
     load();
+    return () => loadController.current?.abort();
   }, [load]);
 
   // ── Optimistic action helper ──────────────────────────────────────────────
@@ -392,6 +402,20 @@ export function EscrowDashboard() {
             {globalError}
           </div>
         )}
+        <h2 id="escrow-list" className="list-heading" ref={headingRef} tabIndex={-1}>
+          Escrows
+        </h2>
+        <EscrowToolbar
+          status={query.status}
+          sort={query.sort}
+          search={search}
+          onStatusChange={(status) => update({ status })}
+          onSortChange={(sort) => update({ sort })}
+          onSearchChange={setSearch}
+        />
+        <p className="small muted" role="status" aria-live="polite" style={{ margin: 0 }}>
+          {contracts !== null && !error && result.total > 0 && `Showing ${result.from}–${result.to} of ${result.total} escrows`}
+        </p>
         {contracts === null && <div className="card muted">Loading escrows...</div>}
         {contracts?.length === 0 && !globalError && (
           <div className="card muted">No escrows yet. Create the first one.</div>

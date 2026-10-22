@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { EscrowDashboard } from '@/components/EscrowDashboard';
 import { site } from '@/lib/site';
 
@@ -17,7 +18,10 @@ export default function ContractsPage() {
           .
         </p>
       </div>
-      <EscrowDashboard />
+      {/* useSearchParams needs a Suspense boundary for the static build */}
+      <Suspense fallback={<div className="card muted">Loading escrows...</div>}>
+        <EscrowDashboard />
+      </Suspense>
     </div>
   );
 }
