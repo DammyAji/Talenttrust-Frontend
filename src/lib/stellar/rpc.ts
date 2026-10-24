@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Address,
   Keypair,
@@ -28,31 +29,32 @@ const CONTRACT_ADDRESS =
   process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID ??
   'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 
-/** A throwaway source account — simulations are read-only and never submitted. */
-const simulationSource = {
-  accountId: () => Keypair.random().publicKey(),
-  sequenceNumber: () => '0',
-  incrementSequenceNumber: () => { /* no-op */ },
-};
-
 /**
  * Run a read-only simulation of a Soroban contract call.
  * No transaction is signed or submitted.
  */
 export async function simulateRead(method: string, args: unknown[]): Promise<xdr.ScVal> {
   const server = getRpcServer();
+  const keypair = Keypair.random();
+
+  // Minimal account-like object for TransactionBuilder
+  const simulationSource: any = {
+    accountId: () => keypair.publicKey(),
+    sequenceNumber: () => '0',
+    incrementSequenceNumber: () => { /* no-op */ },
+  };
 
   function toScVal(arg: unknown): xdr.ScVal {
     if (typeof arg === 'string') {
       return Address.fromString(arg).toScVal();
     }
     if (typeof arg === 'number' || typeof arg === 'bigint') {
-      return xdr.ScVal.scvU64(new xdr.Uint64(BigInt(arg)));
+      return xdr.ScVal.scvU64(new (xdr as any).Uint64(BigInt(arg)));
     }
     throw new Error(`Unsupported simulation argument: ${typeof arg}`);
   }
 
-  const tx = new TransactionBuilder(simulationSource as Parameters<typeof TransactionBuilder>[0], {
+  const tx = new TransactionBuilder(simulationSource, {
     fee: '0',
     networkPassphrase: NETWORK_PASSPHRASE,
   })
@@ -69,13 +71,13 @@ export async function simulateRead(method: string, args: unknown[]): Promise<xdr
     )
     .build();
 
-  const sim = await server.simulateTransaction(tx);
-  if ('error' in sim) {
+  const sim = await server.simulateTransaction(tx) as any;
+  if (sim.error) {
     throw new Error(String(sim.error));
   }
-  const result = sim as { result?: { retval: xdr.ScVal } };
-  if (!result.result?.retval) {
+  if (!sim.result?.retval) {
     throw new Error('On-chain read returned no result');
   }
-  return result.result.retval;
+  return sim.result.retval as xdr.ScVal;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */

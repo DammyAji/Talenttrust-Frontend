@@ -66,22 +66,24 @@ export function getEscrowContract(): Contract {
 }
 
 // ── ScVal decoders ──────────────────────────────────────────────────────────
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function decodeStatus(val: xdr.ScVal): ContractStatus {
   try {
-    if (val.switch().name?.includes('Funded')) return 'Funded';
-    if (val.switch().name?.includes('Completed')) return 'Completed';
-    if (val.switch().name?.includes('Cancelled')) return 'Cancelled';
-    if (val.switch().name?.includes('Disputed')) return 'Disputed';
+    const name: string = (val as any).switch()?.name ?? '';
+    if (name.includes('Funded')) return 'Funded';
+    if (name.includes('Completed')) return 'Completed';
+    if (name.includes('Cancelled')) return 'Cancelled';
+    if (name.includes('Disputed')) return 'Disputed';
   } catch { /* ignore */ }
   return 'Created';
 }
 
 function decodeI128(val: xdr.ScVal): bigint {
   try {
-    const raw = val.value() as { lo: () => { low: number; high: number; unsigned: boolean }; hi: () => { low: number; high: number; unsigned: boolean } };
-    const lo = BigInt(((raw.lo().high >>> 0) * 0x100000000) + (raw.lo().low >>> 0));
-    const hi = BigInt(((raw.hi().high >>> 0) * 0x100000000) + (raw.hi().low >>> 0));
+    const parts = (val as any).i128() as { hi: () => any; lo: () => any };
+    const hi = BigInt(parts.hi().toString());
+    const lo = BigInt(parts.lo().toString());
     return (hi << 64n) | lo;
   } catch {
     return 0n;
@@ -90,12 +92,10 @@ function decodeI128(val: xdr.ScVal): bigint {
 
 function decodeString(val: xdr.ScVal): string {
   try {
-    const v = val.value();
-    if (v instanceof Buffer || v instanceof Uint8Array) return Buffer.from(v).toString();
-    if (typeof v === 'string') return v;
-    return String(v);
+    const b = (val as any).bytes() as Buffer;
+    return Buffer.from(b).toString('utf8');
   } catch {
-    return '';
+    try { return (val as any).sym().toString(); } catch { return ''; }
   }
 }
 
@@ -106,24 +106,18 @@ function decodeAddress(val: xdr.ScVal): string {
 }
 
 function decodeBool(val: xdr.ScVal): boolean {
-  try {
-    const v = val.value();
-    return Boolean(v);
-  } catch { return false; }
+  try { return Boolean((val as any).b()); } catch { return false; }
 }
 
 function scMapGet(entries: xdr.ScMapEntry[], key: string): xdr.ScVal | undefined {
   return entries.find((e) => {
-    try {
-      const k = e.key().value();
-      return (typeof k === 'string' ? k : Buffer.from(k as Buffer).toString()) === key;
-    } catch { return false; }
+    try { return (e.key() as any).sym().toString() === key; } catch { return false; }
   })?.val();
 }
 
 function decodeMilestone(val: xdr.ScVal): OnChainMilestone {
   try {
-    const entries = (val.value() as xdr.ScMapEntry[]) ?? [];
+    const entries: xdr.ScMapEntry[] = (val as any).map() ?? [];
     return {
       title: decodeString(scMapGet(entries, 'title') ?? xdr.ScVal.scvVoid()),
       amount: decodeI128(scMapGet(entries, 'amount') ?? xdr.ScVal.scvVoid()),
@@ -135,13 +129,12 @@ function decodeMilestone(val: xdr.ScVal): OnChainMilestone {
 }
 
 export function decodeEscrow(raw: xdr.ScVal, id: number): OnChainEscrow {
-  const entries = (raw.value() as xdr.ScMapEntry[]) ?? [];
+  const entries: xdr.ScMapEntry[] = (raw as any).map() ?? [];
   const get = (k: string) => scMapGet(entries, k) ?? xdr.ScVal.scvVoid();
 
   const milestones: OnChainMilestone[] = [];
   try {
-    const milVec = get('milestones').value() as xdr.ScVal[];
-    for (const m of milVec ?? []) {
+    for (const m of ((get('milestones') as any).vec() ?? []) as xdr.ScVal[]) {
       milestones.push(decodeMilestone(m));
     }
   } catch { /* empty */ }
@@ -158,6 +151,8 @@ export function decodeEscrow(raw: xdr.ScVal, id: number): OnChainEscrow {
     milestones,
   };
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ── Read helper ─────────────────────────────────────────────────────────────
 
