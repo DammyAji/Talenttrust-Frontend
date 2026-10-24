@@ -110,9 +110,11 @@ function decodeBool(val: xdr.ScVal): boolean {
 }
 
 function scMapGet(entries: xdr.ScMapEntry[], key: string): xdr.ScVal | undefined {
-  return entries.find((e) => {
-    try { return (e.key() as any).sym().toString() === key; } catch { return false; }
-  })?.val();
+  const found = entries.find((e) => {
+    try { return ((e as any).key() as any).sym().toString() === key; } catch { return false; }
+  });
+  if (!found) return undefined;
+  return (found as any).val() as xdr.ScVal;
 }
 
 function decodeMilestone(val: xdr.ScVal): OnChainMilestone {

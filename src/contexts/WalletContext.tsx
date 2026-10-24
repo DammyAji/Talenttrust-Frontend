@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import { isConnected, getPublicKey, signTransaction } from '@stellar/freighter-api';
+import { isConnected, getAddress, signTransaction } from '@stellar/freighter-api';
 
 export interface WalletContextValue {
   address: string | null;
@@ -25,8 +25,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       const connected = await isConnected();
       if (!connected) throw new Error('Freighter is not installed or connected.');
-      const key = await getPublicKey();
-      setAddress(key);
+      const { address } = await getAddress();
+      setAddress(address);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect wallet');
     } finally {
