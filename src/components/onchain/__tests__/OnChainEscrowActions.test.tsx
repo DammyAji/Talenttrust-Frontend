@@ -183,7 +183,7 @@ describe('failure states', () => {
   }
 
   it('shows error for InvalidStatus (code 10)', async () => {
-    jest
+    vi
       .spyOn(submitLib, 'simulateSignSubmit')
       .mockRejectedValue(new Error('InvalidStatus'));
     render(<OnChainEscrowActions id={1} />);
@@ -194,7 +194,7 @@ describe('failure states', () => {
   });
 
   it('shows error for MilestoneAlreadyReleased (code 12)', async () => {
-    jest
+    vi
       .spyOn(submitLib, 'simulateSignSubmit')
       .mockRejectedValue(new Error('MilestoneAlreadyReleased'));
     render(<OnChainEscrowActions id={1} />);
@@ -205,7 +205,7 @@ describe('failure states', () => {
   });
 
   it('shows error for InsufficientFunds (code 13)', async () => {
-    jest
+    vi
       .spyOn(submitLib, 'simulateSignSubmit')
       .mockRejectedValue(new Error('InsufficientFunds'));
     render(<OnChainEscrowActions id={1} />);
@@ -216,7 +216,7 @@ describe('failure states', () => {
   });
 
   it('shows error on wallet rejection', async () => {
-    jest
+    vi
       .spyOn(submitLib, 'simulateSignSubmit')
       .mockRejectedValue(new Error('Transaction cancelled by user.'));
     render(<OnChainEscrowActions id={1} />);
@@ -227,7 +227,7 @@ describe('failure states', () => {
   });
 
   it('shows error on RPC timeout', async () => {
-    jest
+    vi
       .spyOn(submitLib, 'simulateSignSubmit')
       .mockRejectedValue(new Error('RPC timeout'));
     render(<OnChainEscrowActions id={1} />);

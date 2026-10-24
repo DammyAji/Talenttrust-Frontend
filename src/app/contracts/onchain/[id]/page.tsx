@@ -1,18 +1,20 @@
 import { notFound } from 'next/navigation';
 import OnChainEscrowActions from '@/components/onchain/OnChainEscrowActions';
+import { WalletProvider } from '@/contexts/WalletContext';
 
-type Props = { params: { id: string } };
+type Props = { params: Promise<{ id: string }> };
 
-export default function OnChainContractPage({ params }: Props) {
-  const parsed = parseInt(params.id, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== params.id) {
+export default async function OnChainContractPage({ params }: Props) {
+  const { id } = await params;
+  const parsed = parseInt(id, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== id) {
     notFound();
   }
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-2xl">
+    <div className="container" style={{ maxWidth: 720 }}>
+      <WalletProvider>
         <OnChainEscrowActions id={parsed} />
-      </div>
-    </main>
+      </WalletProvider>
+    </div>
   );
 }
