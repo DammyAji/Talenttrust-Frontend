@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import nav from '@/lib/nav.json';
 import { useDisclosure } from '@/hooks/useDisclosure';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export function Header() {
   const pathname = usePathname();
@@ -76,8 +77,8 @@ export function Header() {
           >
             Launch app
           </Link>
+          <ThemeToggle />
         </nav>
-
         {/* Mobile trigger */}
         <button
           ref={triggerRef}
@@ -120,6 +121,9 @@ export function Header() {
         >
           Launch app
         </Link>
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <ThemeToggle />
+        </div>
       </nav>
 
       {/* Backdrop — closes the panel on tap/click */}

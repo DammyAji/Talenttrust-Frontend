@@ -19,6 +19,17 @@ export interface EscrowContract {
   releasedAmount: number;
   status: 'Created' | 'Funded' | 'Completed' | 'Disputed' | 'Resolved' | 'Cancelled';
   reputationIssued: boolean;
+  dispute?: Dispute;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Dispute {
+  raisedBy: string;
+  reason: string;
+  openedAt: string;
+  freelancerBps?: number;
+  resolvedAt?: string;
 }
 
 export interface Reputation {
@@ -28,6 +39,16 @@ export interface Reputation {
   averageRating: number;
 }
 
+export interface Stats {
+  contracts: number;
+  byStatus: Record<EscrowContract["status"], number>;
+  totalEscrowed: number;
+  totalReleased: number;
+}
+
+export function getStats(): Promise<Stats> {
+  return api<Stats>("/stats");
+}
 export type ApiErrorKind = 'network' | 'timeout' | 'http' | 'aborted';
 
 const FRIENDLY_CODES: Record<string, string> = {

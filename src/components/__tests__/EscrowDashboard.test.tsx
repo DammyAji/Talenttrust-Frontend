@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EscrowDashboard } from '@/components/EscrowDashboard';
+import { ConfirmProvider } from '@/components/ui/ConfirmProvider';
 import { escrow } from '@/test/fixtures';
 
 // Minimal stand-in for the App Router: replace() updates useSearchParams()
@@ -219,5 +220,105 @@ describe('EscrowDashboard list', () => {
     expect(firstSignal?.aborted).toBe(true);
     expect(screen.getAllByRole('article')).toHaveLength(1);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('EscrowDashboard cancel confirmation', () => {
+  const contract = escrow(7, {
+    title: 'Website redesign',
+    milestones: [{ index: 0, title: 'Design', amount: 300, released: false }],
+    totalAmount: 1000,
+    fundedAmount: 600,
+    releasedAmount: 300,
+    status: 'Funded',
+  });
+
+  const isCancel = (input: unknown, init?: RequestInit) => String(input).includes('/cancel') && init?.method === 'POST';
+  const cancelCalls = () => fetchMock.mock.calls.filter(([input, init]) => isCancel(input, init as RequestInit | undefined));
+
+  const renderDashboard = (cancel: () => Promise<Response> = () => reply({}, 404)) => {
+    nav.set('');
+    fetchMock.mockImplementation((input: unknown, init?: RequestInit) =>
+      isCancel(input, init) ? cancel() : reply({ data: [contract] }),
+    );
+    render(
+      <ConfirmProvider>
+        <EscrowDashboard />
+      </ConfirmProvider>,
+    );
+  };
+
+  it('makes no API call when the dialog is dismissed without confirming', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button', { name: 'Keep escrow' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    expect(cancelCalls()).toHaveLength(0);
+  });
+
+  it('makes no API call when the dialog is closed with Escape', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('dialog');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    expect(cancelCalls()).toHaveLength(0);
+  });
+
+  it('requires exact text and makes exactly one API call once confirmed', async () => {
+    const user = userEvent.setup();
+    renderDashboard(() => reply({ data: {} }));
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('dialog');
+
+    const confirmButton = screen.getByRole('button', { name: 'Cancel escrow' });
+    const input = screen.getByLabelText(/type 7 to confirm/i);
+    await user.type(input, '8');
+    expect(confirmButton).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, '7');
+    expect(confirmButton).toBeEnabled();
+    await user.click(confirmButton);
+
+    await waitFor(() => expect(cancelCalls()).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(cancelCalls()).toHaveLength(1);
+  });
+
+  it('shows an error when the cancel request fails on the network', async () => {
+    const user = userEvent.setup();
+    renderDashboard(() => Promise.reject(new TypeError('Failed to fetch')));
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('dialog');
+    await user.type(screen.getByLabelText(/type 7 to confirm/i), '7');
+    await user.click(screen.getByRole('button', { name: 'Cancel escrow' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('We could not reach the TalentTrust API');
+    expect(alert).toHaveAttribute('title', 'Failed to fetch');
+  });
+
+  it('keeps the API message as detail on a non-2xx cancel response', async () => {
+    const user = userEvent.setup();
+    renderDashboard(() => reply({ message: 'Escrow already cancelled' }, 400));
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('dialog');
+    await user.type(screen.getByLabelText(/type 7 to confirm/i), '7');
+    await user.click(screen.getByRole('button', { name: 'Cancel escrow' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The TalentTrust API returned an error.');
+    expect(alert).toHaveAttribute('title', 'Escrow already cancelled');
   });
 });
