@@ -1,11 +1,14 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
 import OnChainEscrowActions from '../OnChainEscrowActions';
 import * as escrowLib from '@/lib/stellar/escrow';
 import * as submitLib from '@/lib/stellar/submit';
 import { useWallet } from '@/contexts/WalletContext';
 
-const mockUseWallet = useWallet as jest.Mock;
+vi.mock('@/contexts/WalletContext');
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockUseWallet = useWallet as unknown as ReturnType<typeof vi.fn>;
 
 const CLIENT = 'GCLIENT111';
 const FREELANCER = 'GFREELANCER111';
@@ -27,13 +30,13 @@ function wallet(address: string | null = CLIENT) {
     address,
     isConnecting: false,
     error: null,
-    connect: jest.fn(),
-    disconnect: jest.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
   });
 }
 
 beforeEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   wallet();
 });
 
@@ -41,13 +44,13 @@ beforeEach(() => {
 
 describe('loading and error states', () => {
   it('shows loading state initially', () => {
-    jest.spyOn(escrowLib, 'getContract').mockReturnValue(new Promise(() => {}));
+    vi.spyOn(escrowLib, 'getContract').mockReturnValue(new Promise(() => {}));
     render(<OnChainEscrowActions id={1} />);
     expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument();
   });
 
   it('shows alert when contract load fails', async () => {
-    jest.spyOn(escrowLib, 'getContract').mockRejectedValue(new Error('ContractNotFound'));
+    vi.spyOn(escrowLib, 'getContract').mockRejectedValue(new Error('ContractNotFound'));
     render(<OnChainEscrowActions id={1} />);
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('ContractNotFound')
@@ -59,12 +62,12 @@ describe('loading and error states', () => {
 
 describe('success path', () => {
   beforeEach(() => {
-    jest.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
-    jest.spyOn(escrowLib, 'buildDepositTx').mockResolvedValue({
+    vi.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
+    vi.spyOn(escrowLib, 'buildDepositTx').mockResolvedValue({
       xdr: 'fakexdr',
       networkPassphrase: 'Test',
     });
-    jest.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash123');
+    vi.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash123');
   });
 
   it('renders contract info after load', async () => {
@@ -118,12 +121,12 @@ describe('success path', () => {
 
 describe('cancel flow', () => {
   beforeEach(() => {
-    jest.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
-    jest.spyOn(escrowLib, 'buildCancelTx').mockResolvedValue({
+    vi.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
+    vi.spyOn(escrowLib, 'buildCancelTx').mockResolvedValue({
       xdr: 'fakexdr',
       networkPassphrase: 'Test',
     });
-    jest.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash456');
+    vi.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash456');
   });
 
   it('opens cancel dialog with refund info', async () => {
@@ -167,8 +170,8 @@ describe('cancel flow', () => {
 
 describe('failure states', () => {
   beforeEach(() => {
-    jest.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
-    jest.spyOn(escrowLib, 'buildDepositTx').mockResolvedValue({
+    vi.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...BASE_ESCROW });
+    vi.spyOn(escrowLib, 'buildDepositTx').mockResolvedValue({
       xdr: 'fakexdr',
       networkPassphrase: 'Test',
     });
@@ -269,12 +272,12 @@ describe('Funded escrow with milestones', () => {
   };
 
   beforeEach(() => {
-    jest.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...FUNDED });
-    jest.spyOn(escrowLib, 'buildReleaseTx').mockResolvedValue({
+    vi.spyOn(escrowLib, 'getContract').mockResolvedValue({ ...FUNDED });
+    vi.spyOn(escrowLib, 'buildReleaseTx').mockResolvedValue({
       xdr: 'fakexdr',
       networkPassphrase: 'Test',
     });
-    jest.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash789');
+    vi.spyOn(submitLib, 'simulateSignSubmit').mockResolvedValue('txhash789');
   });
 
   it('shows Release for unreleased milestone', async () => {
