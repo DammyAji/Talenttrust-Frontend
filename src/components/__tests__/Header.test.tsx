@@ -10,11 +10,22 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NotificationsProvider } from '@/components/NotificationsProvider';
 
 // ── Mock next/navigation ──────────────────────────────────────────────────────
 const mockPathname = vi.fn(() => '/');
+const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname(),
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // ── Mock next/link → plain <a> ────────────────────────────────────────────────
@@ -77,13 +88,21 @@ const getPanel = () => document.getElementById('mobile-nav') as HTMLElement;
 
 describe('Header – mobile menu trigger', () => {
   it('renders the trigger button with aria-expanded="false" when closed', () => {
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     expect(getTrigger()).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('sets aria-expanded="true" after toggle and shows the panel', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     const trigger = getTrigger(); // capture before click (labelled "Menu")
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -91,13 +110,21 @@ describe('Header – mobile menu trigger', () => {
   });
 
   it('aria-controls points to the panel id', () => {
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     expect(getTrigger()).toHaveAttribute('aria-controls', 'mobile-nav');
   });
 
   it('label changes to "Close" when open', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
     expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
   });
@@ -106,7 +133,11 @@ describe('Header – mobile menu trigger', () => {
 describe('Header – Escape key', () => {
   it('closes the panel on Escape and returns focus to the trigger', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     const trigger = getTrigger();
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -120,7 +151,11 @@ describe('Header – Escape key', () => {
 describe('Header – outside click (pointer-down)', () => {
   it('closes the panel when clicking outside the panel and trigger', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     const trigger = getTrigger();
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -140,13 +175,21 @@ describe('Header – route change', () => {
   it('closes the panel when pathname changes', async () => {
     const user = userEvent.setup();
     mockPathname.mockReturnValue('/');
-    const { rerender } = render(<Header />);
+    const { rerender } = render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
     expect(getTrigger()).toHaveAttribute('aria-expanded', 'true');
 
     // Simulate route change
     mockPathname.mockReturnValue('/contracts');
-    rerender(<Header />);
+    rerender(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     expect(getTrigger()).toHaveAttribute('aria-expanded', 'false');
   });
 });
@@ -154,7 +197,11 @@ describe('Header – route change', () => {
 describe('Header – focus leaving the panel', () => {
   it('closes the panel when focus moves outside the panel', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
     const panel = getPanel();
     expect(panel).toHaveClass('mobile-nav--open');
@@ -176,7 +223,11 @@ describe('Header – focus leaving the panel', () => {
 describe('Header – CTA present in mobile panel', () => {
   it('renders the Launch app link inside the mobile nav', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
 
     const panel = getPanel();
@@ -190,7 +241,11 @@ describe('Header – aria-current preserved in mobile panel', () => {
   it('marks the active route with aria-current="page" inside mobile nav', async () => {
     mockPathname.mockReturnValue('/docs');
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
 
     const panel = getPanel();
@@ -202,7 +257,11 @@ describe('Header – aria-current preserved in mobile panel', () => {
 describe('Header – body scroll lock', () => {
   it('locks body scroll when panel is open and restores on close', async () => {
     const user = userEvent.setup();
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     await user.click(getTrigger());
     expect(document.body.style.overflow).toBe('hidden');
 
@@ -213,7 +272,11 @@ describe('Header – body scroll lock', () => {
 
 describe('Header – desktop nav', () => {
   it('always renders the desktop nav with all links and the CTA', () => {
-    render(<Header />);
+    render(
+      <NotificationsProvider>
+        <Header />
+      </NotificationsProvider>,
+    );
     const mainNav = screen.getByRole('navigation', { name: /main/i });
     expect(within(mainNav).getByRole('link', { name: /home/i })).toBeInTheDocument();
     expect(within(mainNav).getByRole('link', { name: /launch app/i })).toBeInTheDocument();

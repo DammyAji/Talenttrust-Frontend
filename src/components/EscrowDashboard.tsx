@@ -1,241 +1,139 @@
-'use client';
+"use client";
 
 import {
   FormEvent,
   useCallback,
   useEffect,
+  useMemo,
   useOptimistic,
   useRef,
   useState,
   useTransition,
-} from 'react';
-import { api, EscrowContract } from '@/lib/api';
-import { contractsReducer, OptimisticAction } from '@/lib/optimistic';
+} from "react";
+import { contractsReducer, type OptimisticAction } from "@/lib/optimistic";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { api, ApiError, EscrowContract, Reputation, unwrapContract, unwrapReputation } from "@/lib/api";
+import { StarRating } from "@/components/reputation/StarRating";
+import {
+  applyQuery,
+  ContractQuery,
+  DEFAULT_QUERY,
+  filterContracts,
+  parseQuery,
+  toSearchParams,
+} from "@/lib/contractQuery";
+import { EscrowToolbar } from "./escrow/EscrowToolbar";
+import { Pagination } from "./escrow/Pagination";
+import { ExportMenu } from "./escrow/ExportMenu";
+import { DisputeDialog } from "./disputes/DisputeDialog";
+import { EscrowCard } from "./escrow/EscrowCard";
+import { useConfirm } from "@/components/ui/ConfirmProvider";
+import { useOptionalContractStatus } from "@/components/ContractStatusProvider";
+import { assertNotPaused } from "@/lib/stellar/status";
+import { normalizeAddress } from "@/lib/stellar/address";
+import { AddressInput, type AddressInputHandle } from "@/components/forms/AddressInput";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { WatchToggle } from "@/components/WatchToggle";
+import { useOptionalToast } from "@/components/toast/ToastProvider";
 
-const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a);
+const asContract = (payload: unknown): EscrowContract | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as { data?: EscrowContract; id?: number };
+  if (obj.data && typeof obj.data.id === "number") return obj.data;
+  if (typeof obj.id === "number") return payload as EscrowContract;
+  return null;
+};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EscrowCard — extracted so per-card state is cleanly isolated
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface EscrowCardProps {
-  c: EscrowContract;
-  /** Whether an optimistic update is in-flight for this card */
-  optimistic: boolean;
-  onRelease: (index: number) => void;
-  onDeposit: () => void;
-  /** Blocking actions (not optimistic) */
-  onDispute: () => void;
-  onCancel: () => void;
-  onResolve: () => void;
-  onRate: (rating: number) => void;
-  blockingBusy: boolean;
-  cardError: string | null;
-  onRetry: () => void;
-}
-
-function EscrowCard({
-  c,
-  optimistic,
-  onRelease,
-  onDeposit,
-  onDispute,
-  onCancel,
-  onResolve,
-  onRate,
-  blockingBusy,
-  cardError,
-  onRetry,
-}: EscrowCardProps) {
-  const active = c.status === 'Created' || c.status === 'Funded';
-  const next = c.milestones.find((m) => !m.released);
-  const pct = c.totalAmount ? Math.round((c.releasedAmount / c.totalAmount) * 100) : 0;
-
+function EscrowCardSkeleton() {
   return (
-    <article
-      className="card"
-      aria-busy={optimistic ? 'true' : undefined}
-      style={optimistic ? { opacity: 0.8 } : undefined}
-    >
+    <div className="card skeleton-card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>
-          #{c.id} {c.title}
-        </h3>
-        <span className={`badge badge-${c.status}`}>{c.status}</span>
+        <Skeleton width="55%" height="1.2em" />
+        <Skeleton width={84} height={22} radius={999} />
       </div>
-
-      <p className="small muted" style={{ margin: '6px 0 12px' }}>
-        Client <span className="mono">{short(c.client)}</span> &rarr; Freelancer{' '}
-        <span className="mono">{short(c.freelancer)}</span>
-      </p>
-
-      <div className="progress" aria-label={`${pct}% released`}>
-        <span style={{ width: `${pct}%` }} />
+      <Skeleton width="75%" />
+      <Skeleton variant="block" width="100%" height={8} radius={999} />
+      <Skeleton width="60%" />
+      <div className="stack" style={{ gap: 8, margin: '12px 0' }}>
+        <Skeleton width="80%" />
+        <Skeleton width="65%" />
       </div>
-
-      <p className="small muted" style={{ margin: '8px 0 0' }}>
-        Released {c.releasedAmount} / {c.totalAmount} {c.token} &middot; In escrow{' '}
-        {c.fundedAmount - c.releasedAmount} {c.token}
-      </p>
-
-      <ul className="milestones">
-        {c.milestones.map((m) => (
-          <li key={m.index} style={optimistic && !m.released ? { opacity: 0.6 } : undefined}>
-            <span className="truncate">
-              <span aria-hidden="true">{m.released ? '✓' : '○'}</span>{' '}
-              <span className="sr-only">{m.released ? 'Released:' : 'Pending:'}</span>
-              {m.title}
-            </span>
-            <span className="mono">
-              {m.amount} {c.token}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      {/* Card-local error with Retry */}
-      {cardError && (
-        <div className="alert alert-error" role="alert" style={{ marginTop: 10 }}>
-          <span>{cardError}</span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={onRetry}
-            style={{ marginLeft: 10 }}
-            aria-label={`Retry failed action for contract #${c.id}`}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      <div className="row" style={{ marginTop: 10 }}>
-        {active && c.fundedAmount < c.totalAmount && (
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={optimistic || blockingBusy}
-            onClick={onDeposit}
-            aria-label={`Fund ${c.totalAmount - c.fundedAmount} ${c.token} for contract #${c.id}`}
-          >
-            {optimistic ? 'Funding…' : `Fund ${c.totalAmount - c.fundedAmount} ${c.token}`}
-          </button>
-        )}
-        {active && next && c.fundedAmount - c.releasedAmount >= next.amount && (
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={optimistic || blockingBusy}
-            onClick={() => onRelease(next.index)}
-            aria-label={`Release "${next.title}" (${next.amount} ${c.token}) for contract #${c.id}`}
-          >
-            {optimistic ? `Releasing…` : `Release next`}
-          </button>
-        )}
-        {active && (
-          <>
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={optimistic || blockingBusy}
-              onClick={onDispute}
-              aria-label={`Dispute contract #${c.id}`}
-            >
-              Dispute
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={optimistic || blockingBusy}
-              onClick={onCancel}
-              aria-label={`Cancel contract #${c.id}`}
-            >
-              Cancel
-            </button>
-          </>
-        )}
-        {c.status === 'Disputed' && (
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={blockingBusy}
-            onClick={onResolve}
-            aria-label={`Resolve contract #${c.id} 50/50`}
-          >
-            Resolve 50/50
-          </button>
-        )}
-        {c.status === 'Completed' && !c.reputationIssued && (
-          <>
-            <span className="small muted">Rate freelancer:</span>
-            {[1, 2, 3, 4, 5].map((r) => (
-              <button
-                key={r}
-                className="btn btn-secondary btn-sm"
-                disabled={blockingBusy}
-                onClick={() => onRate(r)}
-                aria-label={`Rate ${r} star${r > 1 ? 's' : ''} for contract #${c.id}`}
-              >
-                {r}
-              </button>
-            ))}
-          </>
-        )}
-        {c.status === 'Completed' && c.reputationIssued && (
-          <span className="small muted">Rated. Thanks!</span>
-        )}
+      <div className="row">
+        <Skeleton variant="block" width={110} height={34} />
+        <Skeleton variant="block" width={110} height={34} />
       </div>
-    </article>
+    </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EscrowDashboard
-// ─────────────────────────────────────────────────────────────────────────────
-
 export function EscrowDashboard() {
+  const confirm = useConfirm();
+  const toast = useOptionalToast();
+  const contractStatus = useOptionalContractStatus()?.status;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const query = useMemo(() => parseQuery(searchParams), [searchParams]);
   const [search, setSearch] = useState(query.q);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const [contracts, setContracts] = useState<EscrowContract[] | null>(null);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  // Per-card errors: contractId → error message
-  const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
-  // Blocking busy state for non-optimistic actions (Cancel, Dispute, Resolve, rate)
-  const [blockingBusy, setBlockingBusy] = useState<number | 'new' | null>(null);
-  // Tracks the last retry action per card so Retry can re-dispatch
-  const retryRef = useRef<Record<number, () => void>>({});
-  // Live-region announcements (polite)
-  const [announcement, setAnnouncement] = useState('');
-
-  // useOptimistic — wraps contracts with local optimistic state
-  const [optimisticContracts, dispatchOptimistic] = useOptimistic(
-    contracts ?? [],
-    contractsReducer,
+  const disputeTriggerRef = useRef<HTMLButtonElement>(null);
+  const [disputeContract, setDisputeContract] = useState<EscrowContract | null>(
+    null,
   );
-
-  // Tracks which contractIds currently have an in-flight optimistic action
-  const [optimisticIds, setOptimisticIds] = useState<Set<number>>(new Set());
-
+  const [contracts, setContracts] = useState<EscrowContract[] | null>(null);
+  // Release and Fund update the card instantly via useOptimistic; React drops
+  // the optimistic state when the transition settles, so a failure rolls back.
+  const [optimisticContracts, dispatchOptimistic] = useOptimistic(contracts ?? [], contractsReducer);
   const [, startTransition] = useTransition();
-
+  const [pendingIds, setPendingIds] = useState<Set<number>>(() => new Set());
+  const pendingRef = useRef<Set<number>>(new Set());
+  const [cardErrors, setCardErrors] = useState<Record<number, { message: string; detail?: string }>>({});
+  const retryRef = useRef<Record<number, () => void>>({});
+  const [error, setError] = useState<{
+    message: string;
+    detail?: string;
+  } | null>(null);
+  const [busy, setBusy] = useState<number | "new" | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [rated, setRated] = useState<Record<number, Reputation>>({});
+  const [ratingErrors, setRatingErrors] = useState<Record<number, string>>({});
+  const loadController = useRef<AbortController | null>(null);
+  const [crossFieldError, setCrossFieldError] = useState<string | null>(null);
+  const clientRef = useRef<AddressInputHandle>(null);
+  const freelancerRef = useRef<AddressInputHandle>(null);
   const [form, setForm] = useState({
     title: 'Website redesign',
-    client: 'GCLIENT' + 'X'.repeat(49),
-    freelancer: 'GFREELANCER' + 'Y'.repeat(45),
+    client: '',
+    freelancer: '',
     milestones: 'Design: 300, Build: 700',
   });
 
-  // ── Load ──────────────────────────────────────────────────────────────────
-
+  // Status is filtered by the API, the rest is done client-side
   const load = useCallback(async () => {
     loadController.current?.abort();
     const controller = new AbortController();
     loadController.current = controller;
     try {
-      const res = await api<{ data: EscrowContract[] }>('/api/v1/contracts');
-      setContracts(res.data.sort((a, b) => b.id - a.id));
-      setGlobalError(null);
+      const qs = query.status
+        ? `?status=${encodeURIComponent(query.status)}`
+        : "";
+      const res = await api<{ data: EscrowContract[] }>(
+        `/api/v1/contracts${qs}`,
+        { signal: controller.signal },
+      );
+      setContracts(Array.isArray(res.data) ? res.data : []);
+      setError(null);
     } catch (e) {
-      setGlobalError(`Could not reach the API: ${(e as Error).message}`);
+      if (e instanceof ApiError && e.kind === "aborted") return;
+      const detail = e instanceof ApiError ? e.message : (e as Error).message;
+      setError({
+        message:
+          e instanceof ApiError
+            ? e.userMessage
+            : `Could not reach the API: ${detail}`,
+        detail,
+      });
       setContracts([]);
     }
   }, [query.status]);
@@ -245,164 +143,338 @@ export function EscrowDashboard() {
     return () => loadController.current?.abort();
   }, [load]);
 
-  // ── Optimistic action helper ──────────────────────────────────────────────
+  const update = useCallback(
+    (patch: Partial<ContractQuery>) => {
+      const qs = toSearchParams({ ...query, page: 1, ...patch }).toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [query, router, pathname],
+  );
+
+  useEffect(() => {
+    setSearch(query.q);
+  }, [query.q]);
+
+  useEffect(() => {
+    if (search.trim() === query.q) return;
+    const t = setTimeout(() => update({ q: search.trim() }), 250);
+    return () => clearTimeout(t);
+  }, [search, query.q, update]);
+
+  const result = useMemo(
+    () => applyQuery(contracts === null ? [] : optimisticContracts, query),
+    [contracts, optimisticContracts, query],
+  );
+  const visible = useMemo(
+    () => (contracts ? filterContracts(contracts, query) : null),
+    [contracts, query],
+  );
+  const filtered = query.status !== "" || query.q !== "";
+
+  const goToPage = (page: number) => {
+    update({ page });
+    headingRef.current?.focus();
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    update(DEFAULT_QUERY);
+  };
+
+  const act = async (
+    id: number | "new",
+    fn: () => Promise<unknown>,
+    messages?: { pending: string; success: string },
+    onSuccess?: (result: unknown) => void,
+  ) => {
+    try {
+      assertNotPaused({ status: contractStatus });
+    } catch (e) {
+      setError({ message: (e as Error).message });
+      setAnnouncement(`Error: ${(e as Error).message}`);
+      return;
+    }
+
+    setBusy(id);
+    setError(null);
+    if (messages) setAnnouncement(messages.pending);
+    try {
+      const result = await fn();
+      // Write the returned contract into local state; only fall back to a
+      // full reload when the response does not contain a contract.
+      const updated = unwrapContract(result);
+      if (updated) {
+        setContracts((prev) => {
+          if (!prev) return [updated];
+          const exists = prev.some((c) => c.id === updated.id);
+          return exists ? prev.map((c) => (c.id === updated.id ? updated : c)) : [updated, ...prev];
+        });
+      } else {
+        // Endpoints that don't return a contract (e.g. rate) require a refresh.
+        await load();
+      }
+      if (messages) setAnnouncement(messages.success);
+      onSuccess?.(result);
+    } catch (e) {
+      if (e instanceof ApiError && e.kind === "aborted") return;
+      const detail = e instanceof ApiError ? e.message : (e as Error).message;
+      const message = e instanceof ApiError ? e.userMessage : detail;
+      setError({ message, detail });
+      setAnnouncement(`Error: ${message}`);
+      toast.error(detail);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const setPending = (id: number, on: boolean) => {
+    const next = new Set(pendingRef.current);
+    if (on) next.add(id);
+    else next.delete(id);
+    pendingRef.current = next;
+    setPendingIds(next);
+  };
 
   /**
-   * Dispatches an optimistic action, executes the API call inside a
-   * transition, then on success replaces the card with the server response.
-   * On failure the optimistic state is discarded automatically by React 19
-   * and we show a card-local error with a Retry button.
+   * Optimistic Release / Fund: the card updates immediately, the request runs
+   * inside an async transition, and on success the server response wins. On
+   * failure the optimistic state is discarded and a card-local error with a
+   * Retry button is shown.
    */
-  const optimisticAct = useCallback(
-    (
-      contractId: number,
-      action: OptimisticAction,
-      announcement: string,
-      apiFn: () => Promise<unknown>,
-    ) => {
-      // Prevent double-submit while in flight
-      if (optimisticIds.has(contractId)) return;
-
-      setCardErrors((prev) => {
-        const next = { ...prev };
-        delete next[contractId];
-        return next;
-      });
-      setAnnouncement(announcement);
-
-      // Register Retry
-      retryRef.current[contractId] = () =>
-        optimisticAct(contractId, action, announcement, apiFn);
-
-      setOptimisticIds((prev) => new Set([...prev, contractId]));
-
-      startTransition(() => {
-        dispatchOptimistic(action);
-      });
-
-      apiFn()
-        .then(() => load())
-        .catch((e) => {
-          setCardErrors((prev) => ({
-            ...prev,
-            [contractId]: (e as Error).message || 'Action failed. Please retry.',
-          }));
-          setAnnouncement(`Action failed for contract #${contractId}.`);
-        })
-        .finally(() => {
-          setOptimisticIds((prev) => {
-            const next = new Set(prev);
-            next.delete(contractId);
-            return next;
-          });
-        });
-    },
-    [optimisticIds, dispatchOptimistic, load],
-  );
-
-  // ── Blocking action helper (Cancel, Dispute, Resolve, rate) ───────────────
-
-  const blockingAct = useCallback(
-    async (id: number | 'new', fn: () => Promise<unknown>) => {
-      setBlockingBusy(id);
-      setGlobalError(null);
+  const optimisticAct = (
+    contractId: number,
+    action: OptimisticAction,
+    fn: () => Promise<unknown>,
+    messages: { pending: string; success: string },
+    onSuccess?: () => void,
+  ) => {
+    if (pendingRef.current.has(contractId)) return; // no double-submit
+    try {
+      assertNotPaused({ status: contractStatus });
+    } catch (e) {
+      setCardErrors((prev) => ({ ...prev, [contractId]: { message: (e as Error).message } }));
+      setAnnouncement(`Error: ${(e as Error).message}`);
+      return;
+    }
+    retryRef.current[contractId] = () => optimisticAct(contractId, action, fn, messages, onSuccess);
+    setCardErrors((prev) => {
+      const next = { ...prev };
+      delete next[contractId];
+      return next;
+    });
+    setAnnouncement(messages.pending);
+    setPending(contractId, true);
+    startTransition(async () => {
+      dispatchOptimistic(action);
       try {
-        await fn();
-        await load();
+        const response = await fn();
+        const updated = unwrapContract(response);
+        if (updated) {
+          startTransition(() => {
+            setContracts((prev) => (prev ? prev.map((c) => (c.id === updated.id ? updated : c)) : [updated]));
+          });
+        } else {
+          await load();
+        }
+        setAnnouncement(messages.success);
+        onSuccess?.();
       } catch (e) {
-        setGlobalError((e as Error).message);
+        if (e instanceof ApiError && e.kind === "aborted") return;
+        const detail = e instanceof ApiError ? e.message : (e as Error).message;
+        const message = e instanceof ApiError ? e.userMessage : detail || "Action failed. Please retry.";
+        setCardErrors((prev) => ({ ...prev, [contractId]: { message, detail } }));
+        setAnnouncement(`Error: ${message}`);
+        toast.error(detail);
       } finally {
-        setBlockingBusy(null);
+        setPending(contractId, false);
       }
-    },
-    [load],
-  );
+    });
+  };
 
-  // ── Create form ───────────────────────────────────────────────────────────
+  // Rating has its own flow: the endpoint returns a Reputation (not a contract)
+  // and errors are shown inline on the card so they survive a list refresh.
+  const rate = async (c: EscrowContract, rating: number) => {
+    try {
+      assertNotPaused({ status: contractStatus });
+    } catch (e) {
+      setRatingErrors((prev) => ({ ...prev, [c.id]: (e as Error).message }));
+      return;
+    }
+    setBusy(c.id);
+    setRatingErrors((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
+    setAnnouncement("Submitting rating…");
+    try {
+      const reputation = await api<Reputation>(`/api/v1/contracts/${c.id}/reputation`, {
+        method: "POST",
+        body: { rating },
+      }).then(unwrapReputation);
+      if (reputation) setRated((prev) => ({ ...prev, [c.id]: reputation }));
+      await load();
+      setAnnouncement("Rating submitted");
+      toast.success(`Rating submitted for escrow #${c.id}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.kind === "aborted") return;
+      // Show the API detail (e.g. "already rated") inline on the card.
+      const message = (e as Error).message;
+      setRatingErrors((prev) => ({ ...prev, [c.id]: message }));
+      setAnnouncement(`Error: ${message}`);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const viewEscrow = (id: number) => {
+    const el = document.getElementById(`escrow-${id}`);
+    el?.scrollIntoView({ block: "center" });
+    el?.focus({ preventScroll: true });
+  };
 
   const create = (e: FormEvent) => {
     e.preventDefault();
+    setCrossFieldError(null);
+
+    const clientOk = clientRef.current?.validate() ?? false;
+    const freelancerOk = freelancerRef.current?.validate() ?? false;
+    if (!clientOk) {
+      clientRef.current?.focus();
+      return;
+    }
+    if (!freelancerOk) {
+      freelancerRef.current?.focus();
+      return;
+    }
+
+    const client = normalizeAddress(form.client);
+    const freelancer = normalizeAddress(form.freelancer);
+    if (client === freelancer) {
+      setCrossFieldError('Client and freelancer must be different addresses.');
+      freelancerRef.current?.focus();
+      return;
+    }
+
     const milestones = form.milestones
-      .split(',')
+      .split(",")
       .map((part) => part.trim())
       .filter(Boolean)
       .map((part, i) => {
-        const [title, amount] = part.includes(':')
-          ? part.split(':')
+        const [title, amount] = part.includes(":")
+          ? part.split(":")
           : [`Milestone ${i + 1}`, part];
         return { title: title.trim(), amount: Number(amount) };
       });
-    blockingAct('new', () =>
+    act("new", () =>
       api('/api/v1/contracts', {
         method: 'POST',
-        body: { title: form.title, client: form.client, freelancer: form.freelancer, milestones },
+        body: { title: form.title, client, freelancer, milestones },
       }),
+      { pending: "Creating escrow…", success: "Escrow created" },
+      (result) => {
+        const created = asContract(result);
+        if (created?.id) {
+          toast.success(`Escrow #${created.id} created`, {
+            action: { label: "View escrow", onClick: () => viewEscrow(created.id) },
+          });
+        } else {
+          toast.success("Escrow created");
+        }
+      },
     );
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div className="dash">
-      {/* Polite live region for optimistic action announcements */}
-      <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="live-region">
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+        data-testid="escrow-live-announcer"
+      >
         {announcement}
       </div>
 
-      <form className="card form" onSubmit={create} aria-labelledby="new-escrow">
-        <h3 id="new-escrow">New escrow</h3>
-        <div className="field">
-          <label htmlFor="title">Title</label>
-          <input
-            id="title"
-            className="input"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="client">Client address</label>
-          <input
+      <section aria-labelledby="create-escrow-heading">
+        <h2 id="create-escrow-heading" className="sr-only">
+          Create escrow
+        </h2>
+        <form
+          className="card form"
+          onSubmit={create}
+          aria-labelledby="new-escrow"
+          aria-busy={busy === "new"}
+        >
+          <h3 id="new-escrow">New escrow</h3>
+          <div className="field">
+            <label htmlFor="title">Title</label>
+            <input
+              id="title"
+              className="input"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+          </div>
+          <AddressInput
+            ref={clientRef}
             id="client"
-            className="input mono"
+            label="Client address"
             value={form.client}
-            onChange={(e) => setForm({ ...form, client: e.target.value })}
-            required
+            onChange={(client) => setForm((current) => ({ ...current, client }))}
+            placeholder="G... Stellar account address"
+            description="56 characters, starting with G. Checksum is verified before submitting."
           />
-        </div>
-        <div className="field">
-          <label htmlFor="freelancer">Freelancer address</label>
-          <input
+          <AddressInput
+            ref={freelancerRef}
             id="freelancer"
-            className="input mono"
+            label="Freelancer address"
             value={form.freelancer}
-            onChange={(e) => setForm({ ...form, freelancer: e.target.value })}
-            required
+            onChange={(freelancer) => {
+              setCrossFieldError(null);
+              setForm((current) => ({ ...current, freelancer }));
+            }}
+            placeholder="G... Stellar account address"
+            description="Must be a different account from the client."
+            error={crossFieldError}
           />
-        </div>
-        <div className="field">
-          <label htmlFor="milestones">Milestones</label>
-          <input
-            id="milestones"
-            className="input"
-            value={form.milestones}
-            onChange={(e) => setForm({ ...form, milestones: e.target.value })}
-            required
-          />
-          <span className="small muted">Comma separated, as Title: amount</span>
-        </div>
-        <button className="btn btn-primary" type="submit" disabled={blockingBusy === 'new'}>
-          {blockingBusy === 'new' ? 'Creating...' : 'Create escrow'}
-        </button>
-      </form>
+          <div className="field">
+            <label htmlFor="milestones">Milestones</label>
+            <input
+              id="milestones"
+              className="input"
+              value={form.milestones}
+              onChange={(e) => setForm({ ...form, milestones: e.target.value })}
+              required
+            />
+            <span className="small muted">Comma separated, as Title: amount</span>
+          </div>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={busy === "new"}
+          >
+            {busy === "new" ? "Creating..." : "Create escrow"}
+          </button>
+        </form>
+      </section>
 
-      <div className="stack" style={{ minWidth: 0 }}>
-        {globalError && (
-          <div className="alert alert-error" role="alert">
-            {globalError}
+      <section className="stack" style={{ minWidth: 0 }} aria-labelledby="escrow-list">
+        <div className="row list-actions">
+          <ExportMenu contracts={visible} />
+        </div>
+        {error && (
+          <div className="alert alert-error" role="alert" title={error.detail}>
+            {error.message}
           </div>
         )}
-        <h2 id="escrow-list" className="list-heading" ref={headingRef} tabIndex={-1}>
+        <h2
+          id="escrow-list"
+          className="list-heading"
+          ref={headingRef}
+          tabIndex={-1}
+        >
           Escrows
         </h2>
         <EscrowToolbar
@@ -413,77 +485,163 @@ export function EscrowDashboard() {
           onSortChange={(sort) => update({ sort })}
           onSearchChange={setSearch}
         />
-        <p className="small muted" role="status" aria-live="polite" style={{ margin: 0 }}>
-          {contracts !== null && !error && result.total > 0 && `Showing ${result.from}–${result.to} of ${result.total} escrows`}
+        <p
+          className="small muted"
+          role="status"
+          aria-live="polite"
+          style={{ margin: 0 }}
+        >
+          {contracts !== null &&
+            !error &&
+            result.total > 0 &&
+            `Showing ${result.from}–${result.to} of ${result.total} escrows`}
         </p>
-        {contracts === null && <div className="card muted">Loading escrows...</div>}
-        {contracts?.length === 0 && !globalError && (
-          <div className="card muted">No escrows yet. Create the first one.</div>
+        {contracts === null && (
+          <div className="skeleton-cards" role="status" aria-live="polite">
+            <span className="sr-only">Loading…</span>
+            {[0, 1, 2].map((i) => (
+              <EscrowCardSkeleton key={i} />
+            ))}
+          </div>
         )}
-
-        {optimisticContracts.map((c) => (
+        {contracts !== null &&
+          result.total === 0 &&
+          !error &&
+          (filtered ? (
+            <div
+              className="card row empty"
+              style={{ justifyContent: "space-between" }}
+            >
+              <span className="muted">No escrows match these filters.</span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={clearFilters}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <div className="card muted">
+              No escrows yet. Create the first one.
+            </div>
+          ))}
+        {result.items.map((c) => (
           <EscrowCard
             key={c.id}
-            c={c}
-            optimistic={optimisticIds.has(c.id)}
-            cardError={cardErrors[c.id] ?? null}
-            blockingBusy={blockingBusy === c.id}
-            onRelease={(index) =>
-              optimisticAct(
-                c.id,
-                { type: 'release', contractId: c.id, milestoneIndex: index },
-                `Releasing milestone ${index + 1}…`,
-                () =>
-                  api(`/api/v1/contracts/${c.id}/milestones/${index}/release`, {
-                    method: 'POST',
-                  }),
-              )
-            }
-            onDeposit={() =>
-              optimisticAct(
-                c.id,
-                { type: 'deposit', contractId: c.id, amount: c.totalAmount - c.fundedAmount },
-                `Funding contract #${c.id}…`,
-                () =>
-                  api(`/api/v1/contracts/${c.id}/deposit`, {
-                    method: 'POST',
-                    body: { amount: c.totalAmount - c.fundedAmount },
-                  }),
-              )
-            }
-            onDispute={() =>
-              blockingAct(c.id, () =>
-                api(`/api/v1/contracts/${c.id}/dispute`, {
-                  method: 'POST',
-                  body: { raisedBy: c.client, reason: 'Raised from dashboard' },
-                }),
-              )
-            }
-            onCancel={() =>
-              blockingAct(c.id, () =>
-                api(`/api/v1/contracts/${c.id}/cancel`, { method: 'POST' }),
-              )
-            }
-            onResolve={() =>
-              blockingAct(c.id, () =>
-                api(`/api/v1/contracts/${c.id}/resolve`, {
-                  method: 'POST',
-                  body: { freelancerBps: 5000 },
-                }),
-              )
-            }
-            onRate={(rating) =>
-              blockingAct(c.id, () =>
-                api(`/api/v1/contracts/${c.id}/reputation`, {
-                  method: 'POST',
-                  body: { rating },
-                }),
-              )
-            }
+            contract={c}
+            busy={busy === c.id || pendingIds.has(c.id)}
+            optimistic={pendingIds.has(c.id)}
+            error={cardErrors[c.id] ?? null}
             onRetry={() => retryRef.current[c.id]?.()}
+            headerActions={<WatchToggle contract={c} />}
+            extraActions={
+              (c.status === "Completed" || c.status === "Resolved" || c.status === "Cancelled") && (
+                <Link href={`/contracts/${c.id}/statement`} className="btn btn-secondary btn-sm">
+                  Statement
+                </Link>
+              )
+            }
+            onFund={(contract, amount) =>
+              optimisticAct(
+                contract.id,
+                { type: "deposit", contractId: contract.id, amount },
+                () =>
+                  api(`/api/v1/contracts/${contract.id}/deposit`, {
+                    method: "POST",
+                    body: { amount },
+                  }),
+                { pending: `Funding escrow #${contract.id}…`, success: `Escrow #${contract.id} funded` },
+                () => toast.success(`Escrow #${contract.id} funded`),
+              )
+            }
+            onReleaseNext={(contract, milestoneIndex) =>
+              optimisticAct(
+                contract.id,
+                { type: "release", contractId: contract.id, milestoneIndex },
+                () =>
+                  api(`/api/v1/contracts/${contract.id}/milestones/${milestoneIndex}/release`, {
+                    method: "POST",
+                  }),
+                { pending: "Releasing milestone…", success: "Milestone released" },
+                () => toast.success(`Escrow #${contract.id}: milestone released`),
+              )
+            }
+            onDispute={(contract, trigger) => {
+              disputeTriggerRef.current = trigger;
+              setDisputeContract(contract);
+            }}
+            onCancel={async (contract) => {
+              const held = contract.fundedAmount - contract.releasedAmount;
+              const confirmed = await confirm({
+                title: `Cancel escrow #${contract.id}?`,
+                description: `Refund ${held} ${contract.token} to the client and close escrow #${contract.id}. This cannot be undone.`,
+                tone: "danger",
+                confirmLabel: "Cancel escrow",
+                cancelLabel: "Keep escrow",
+                requireText: held > 0 ? String(contract.id) : undefined,
+              });
+              if (confirmed) {
+                act(
+                  contract.id,
+                  () => api(`/api/v1/contracts/${contract.id}/cancel`, { method: "POST" }),
+                  { pending: "Cancelling escrow…", success: "Escrow cancelled" },
+                  () => toast.success(`Escrow #${contract.id} cancelled`),
+                );
+              }
+            }}
+            onResolve={(contract) =>
+              act(
+                contract.id,
+                () =>
+                  api(`/api/v1/contracts/${contract.id}/resolve`, {
+                    method: "POST",
+                    body: { freelancerBps: 5000 },
+                  }),
+                { pending: "Resolving dispute…", success: "Dispute resolved" },
+                () => toast.success(`Escrow #${contract.id} resolved`),
+              )
+            }
+            ratingSlot={
+              c.status === "Completed" ? (
+                <>
+                  {!c.reputationIssued && !rated[c.id] && (
+                    <StarRating onSubmit={(rating) => rate(c, rating)} disabled={busy === c.id} />
+                  )}
+                  {rated[c.id] && (
+                    <p className="small rate-note">
+                      New average: {rated[c.id].averageRating} / 5 across {rated[c.id].completedContracts}{" "}
+                      <Link href={`/reputation?address=${encodeURIComponent(c.freelancer)}`}>View reputation</Link>
+                    </p>
+                  )}
+                  {c.reputationIssued && !rated[c.id] && <span className="small muted">Rated. Thanks!</span>}
+                  {ratingErrors[c.id] && (
+                    <div className="alert alert-error small" role="alert" style={{ flex: "1 1 100%", margin: 0 }}>
+                      {ratingErrors[c.id]}
+                    </div>
+                  )}
+                </>
+              ) : undefined
+            }
           />
         ))}
-      </div>
+        <Pagination
+          page={result.page}
+          pageCount={result.pageCount}
+          onPageChange={goToPage}
+        />
+      </section>
+      {disputeContract && (
+        <DisputeDialog
+          contract={disputeContract}
+          triggerRef={disputeTriggerRef}
+          onClose={() => setDisputeContract(null)}
+          onSuccess={async () => {
+            const id = disputeContract.id;
+            await load();
+            toast.success(`Escrow #${id} disputed`);
+          }}
+        />
+      )}
     </div>
   );
 }
