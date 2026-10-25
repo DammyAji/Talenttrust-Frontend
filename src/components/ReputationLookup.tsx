@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { StrKey } from '@stellar/stellar-sdk';
 import { api, Reputation } from '@/lib/api';
 import { OnChainReputation, readOnChainReputation } from '@/lib/stellar/reputation';
@@ -9,6 +10,7 @@ import { site } from '@/lib/site';
 const DEMO_ADDRESS = 'GFREELANCERDEMOBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 
 export function ReputationLookup() {
+  const searchParams = useSearchParams();
   const [address, setAddress] = useState(DEMO_ADDRESS);
   const [addressError, setAddressError] = useState<string | null>(null);
 
@@ -32,13 +34,14 @@ export function ReputationLookup() {
       apiResult.completedContracts !== chainResult.completedContracts ||
       apiResult.totalRating !== chainResult.totalRating);
 
-  const lookup = async (e: FormEvent) => {
-    e.preventDefault();
-    const value = address.trim();
+  const performLookup = useCallback(async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    setAddress(trimmed);
     setAddressError(null);
     clearResults();
 
-    if (!StrKey.isValidEd25519PublicKey(value)) {
+    if (!StrKey.isValidEd25519PublicKey(trimmed)) {
       setAddressError('Enter a valid Stellar public address (it must start with G and pass the StrKey checksum).');
       return;
     }
@@ -46,8 +49,8 @@ export function ReputationLookup() {
     setBusy(true);
     try {
       const [apiSettled, chainSettled] = await Promise.allSettled([
-        api<Reputation>(`/api/v1/reputation/${encodeURIComponent(value)}`),
-        readOnChainReputation(value),
+        api<Reputation>(`/api/v1/reputation/${encodeURIComponent(trimmed)}`),
+        readOnChainReputation(trimmed),
       ]);
       if (apiSettled.status === 'fulfilled') {
         setApiResult(apiSettled.value);
@@ -62,6 +65,19 @@ export function ReputationLookup() {
     } finally {
       setBusy(false);
     }
+  }, [clearResults]);
+
+  useEffect(() => {
+    const queryAddress = searchParams?.get('address');
+    if (queryAddress && queryAddress.trim()) {
+      const clean = queryAddress.trim();
+      performLookup(clean);
+    }
+  }, [searchParams, performLookup]);
+
+  const lookup = async (e: FormEvent) => {
+    e.preventDefault();
+    performLookup(address);
   };
 
   const retryApi = async () => {

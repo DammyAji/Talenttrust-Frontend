@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import type { EscrowContract } from '@/lib/api';
 import { milestoneState, type MilestoneStatus } from './milestoneState';
 
@@ -9,6 +10,8 @@ export interface MilestoneTimelineProps {
   onRelease: (index: number) => void;
   /** Disables all release buttons while an action is in flight. */
   busy?: boolean;
+  /** Show the cumulative released/total summary bar (hide it when the parent already shows progress). */
+  showSummary?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -47,15 +50,17 @@ const STATUS_META: Record<
 // ──────────────────────────────────────────────────────────────────────────────
 // Component
 // ──────────────────────────────────────────────────────────────────────────────
-export function MilestoneTimeline({ contract, onRelease, busy = false }: MilestoneTimelineProps) {
+export function MilestoneTimeline({ contract, onRelease, busy = false, showSummary = true }: MilestoneTimelineProps) {
+  // Unique per instance: several timelines render on the dashboard at once.
+  const headingId = useId();
   const { milestones, totalAmount, releasedAmount, token } = contract;
   const pct = totalAmount > 0 ? Math.round((releasedAmount / totalAmount) * 100) : 0;
 
   return (
-    <section className="mt-timeline" aria-labelledby="mt-heading">
-      <h3 id="mt-heading" className="mt-title">
+    <section className="mt-timeline" aria-labelledby={headingId}>
+      <h4 id={headingId} className="mt-title">
         Milestones
-      </h3>
+      </h4>
 
       {/* Step list */}
       <ol className="mt-list" aria-label="Milestone timeline">
@@ -138,6 +143,7 @@ export function MilestoneTimeline({ contract, onRelease, busy = false }: Milesto
       </ol>
 
       {/* Cumulative progress summary */}
+      {showSummary && (
       <div className="mt-summary">
         <div className="mt-summary-text">
           <span>
@@ -164,6 +170,7 @@ export function MilestoneTimeline({ contract, onRelease, busy = false }: Milesto
           <span className="mt-progressbar-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
         </div>
       </div>
+      )}
     </section>
   );
 }
