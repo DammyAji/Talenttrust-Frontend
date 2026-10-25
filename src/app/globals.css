@@ -565,6 +565,7 @@ tr:last-child td { border-bottom: 0; }
     width: calc(100vw - 24px);
     max-width: 420px;
   }
+}
 .list-actions { justify-content: flex-end; }
 .export { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .export > .btn:focus-visible, .export-menu button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -717,6 +718,7 @@ tr:last-child td { border-bottom: 0; }
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--muted);
+}
 
 /* Skeletons */
 .skeleton { display: block; background: var(--surface-2); position: relative; overflow: hidden; }
@@ -741,6 +743,7 @@ tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none; display: none; }
   .skeleton { background: var(--surface-2); }
+}
 
 /* Escrow statement */
 .statement { padding: 28px 20px 72px; max-width: 880px; }
@@ -799,6 +802,7 @@ tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   .star { transition: none; transform: none; }
   .star:hover { transform: none; }
+}
 
 /* ── MilestoneTimeline ────────────────────────────────────────────────── */
 .mt-timeline { margin: 16px 0; }
