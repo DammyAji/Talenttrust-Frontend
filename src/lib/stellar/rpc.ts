@@ -1,56 +1,67 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Address,
   Keypair,
   Networks,
   Operation,
   TransactionBuilder,
-  type TransactionSource,
   xdr,
+  rpc as StellarRpc,
+  scValToNative,
 } from '@stellar/stellar-sdk';
-import { Server } from '@stellar/stellar-sdk/rpc';
 import { site } from '../site';
 
-export const RPC_URL = 'https://soroban-testnet.stellar.org';
+export const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? site.rpcUrl;
+export const NETWORK_PASSPHRASE =
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? (site.network === 'mainnet' || site.network === 'public' ? Networks.PUBLIC : Networks.TESTNET);
 
-export const networkPassphrase = site.network === 'testnet' ? Networks.TESTNET : Networks.PUBLIC;
+let _server: StellarRpc.Server | null = null;
 
-const server = new Server(RPC_URL);
-
-/** Convert a positional argument to a Soroban ScVal. */
-function toScVal(arg: unknown): xdr.ScVal {
-  if (typeof arg === 'string') {
-    return Address.fromString(arg).toScVal();
+export function getRpcServer(): StellarRpc.Server {
+  if (!_server) {
+    _server = new StellarRpc.Server(RPC_URL, { allowHttp: false });
   }
-  if (typeof arg === 'number' || typeof arg === 'bigint') {
-    return xdr.ScVal.scvU64(BigInt(arg));
-  }
-  throw new Error(`Unsupported simulation argument: ${typeof arg}`);
+  return _server;
 }
 
-/** A throwaway source account: simulations are read-only and never submitted. */
-const simulationSource: TransactionSource = {
-  accountId: () => Keypair.random().publicKey(),
-  sequenceNumber: () => '0',
-  incrementSequenceNumber: () => {
-    /* no-op */
-  },
-};
+// ── Legacy simulateRead (used by reputation.ts) ──────────────────────────────
+
+const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID ?? site.contractId;
 
 /**
  * Run a read-only simulation of a Soroban contract call.
- * No transaction is signed or submitted; the RPC node executes the call against the
- * current ledger state and returns the host function result.
+ * No transaction is signed or submitted.
  */
 export async function simulateRead(method: string, args: unknown[]): Promise<xdr.ScVal> {
+  const server = getRpcServer();
+  const keypair = Keypair.random();
+
+  // Minimal account-like object for TransactionBuilder
+  const simulationSource: any = {
+    accountId: () => keypair.publicKey(),
+    sequenceNumber: () => '0',
+    incrementSequenceNumber: () => { /* no-op */ },
+  };
+
+  function toScVal(arg: unknown): xdr.ScVal {
+    if (typeof arg === 'string') {
+      return Address.fromString(arg).toScVal();
+    }
+    if (typeof arg === 'number' || typeof arg === 'bigint') {
+      return xdr.ScVal.scvU64(new (xdr as any).Uint64(BigInt(arg)));
+    }
+    throw new Error(`Unsupported simulation argument: ${typeof arg}`);
+  }
+
   const tx = new TransactionBuilder(simulationSource, {
     fee: '0',
-    networkPassphrase,
+    networkPassphrase: NETWORK_PASSPHRASE,
   })
     .addOperation(
       Operation.invokeHostFunction({
         func: xdr.HostFunction.hostFunctionTypeInvokeContract(
           new xdr.InvokeContractArgs({
-            contractAddress: Address.fromString(site.contractId).toScAddress(),
+            contractAddress: Address.fromString(CONTRACT_ADDRESS).toScAddress(),
             functionName: method,
             args: args.map(toScVal),
           }),
@@ -59,12 +70,21 @@ export async function simulateRead(method: string, args: unknown[]): Promise<xdr
     )
     .build();
 
-  const sim = await server.simulateTransaction(tx);
-  if ('error' in sim) {
-    throw new Error(sim.error);
+  const sim = await server.simulateTransaction(tx) as any;
+  if (sim.error) {
+    throw new Error(String(sim.error));
   }
   if (!sim.result?.retval) {
     throw new Error('On-chain read returned no result');
   }
-  return sim.result.retval;
+  return sim.result.retval as xdr.ScVal;
 }
+
+export type ScValResult = boolean | number | bigint | string | Uint8Array | null;
+
+/** Simulate a read-only contract call and decode the return value to a JS primitive. */
+export async function simulateContractCall(method: string, args: unknown[] = []): Promise<ScValResult> {
+  const value = scValToNative(await simulateRead(method, args));
+  return (value ?? null) as ScValResult;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

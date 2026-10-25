@@ -35,7 +35,7 @@ All optional (defaults point at the live deployments), see `.env.example`:
 npm ci
 npm run dev     # http://localhost:3000
 npm run lint    # type check
-npm test        # verifies every internal link maps to a route
+npm test        # verifies internal links and runs the Vitest unit tests
 npm run build
 ```
 

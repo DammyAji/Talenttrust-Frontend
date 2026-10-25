@@ -61,14 +61,19 @@ export interface QueryResult {
   to: number;
 }
 
-export function applyQuery(list: EscrowContract[], query: ContractQuery): QueryResult {
+// Search + sort, without paging
+export function filterContracts(list: EscrowContract[], query: ContractQuery): EscrowContract[] {
   const q = query.q.toLowerCase();
   const matches = q
     ? list.filter((c) =>
         [c.title, String(c.id), c.client, c.freelancer].some((v) => v.toLowerCase().includes(q)),
       )
     : list.slice();
-  matches.sort(compare[query.sort]);
+  return matches.sort(compare[query.sort]);
+}
+
+export function applyQuery(list: EscrowContract[], query: ContractQuery): QueryResult {
+  const matches = filterContracts(list, query);
 
   const total = matches.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
